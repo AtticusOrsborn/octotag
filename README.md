@@ -11,6 +11,47 @@ A fast-paced browser game where you chase and catch octopi using your net in a b
 - **Progress Tracking**: Real-time score tracking and completion time display
 - **Polished UI**: Marine-themed interface with animated elements and progress indicators
 
+## 🏗️ Technical Architecture
+
+### Component Structure
+```
+app/
+├── components/
+│   ├── Octopus.tsx       # Main game component
+│   └── SeaShanty.tsx     # Audio component
+├── layout.tsx            # App layout
+└── page.tsx             # Entry point
+```
+
+### State Management
+The game utilizes React's useState and useEffect hooks for managing:
+- Octopus positions and states
+- Player interaction
+- Game progression
+- Visual effects
+
+### Performance Optimizations
+1. **Render Optimization**
+   - Efficient state updates
+   - Batch processing for particle effects
+   - Smart re-rendering using React.memo
+
+2. **Animation System**
+   - CSS-based animations for performance
+   - Hardware-accelerated transforms
+   - Optimized particle system
+
+3. **State Updates**
+   - Throttled event handlers
+   - Batched state updates
+   - Efficient collision detection
+
+### Technical Highlights
+- **TypeScript Integration**: Full type safety with interfaces for game entities
+- **Modern React Patterns**: Functional components with hooks
+- **Responsive Design**: Fluid layouts and adaptive gameplay
+- **Performance First**: Optimized for 60 FPS gameplay
+
 ## 🚀 Getting Started
 
 ### Prerequisites

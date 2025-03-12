@@ -1,20 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface Bubble {
   id: number;
   x: number;
   y: number;
+  size: number;
 }
 
 interface OctopusData {
   id: number;
-  position: { x: number; y: number };
-  isMoving: boolean;
-  justWrapped: boolean;
-  isCaught: boolean;
-  isPopping?: boolean;
+  x: number;
+  y: number;
+  isPopping: boolean;
 }
 
 interface CatchBubble {
@@ -48,10 +47,13 @@ export function Octopus() {
   const CATCH_DISTANCE = 50;
 
   // Fishtank dimensions
-  const TANK_WIDTH = 200;
-  const TANK_HEIGHT = 400;
+  const TANK_WIDTH = 800;
+  const TANK_HEIGHT = 600;
   const TANK_PADDING = 20;
   const CAUGHT_OCTOPUS_SIZE = 30;
+
+  // Constants
+  const CATCH_RADIUS = 40;
 
   // Format time in mm:ss.ms format
   const formatTime = (timeMs: number) => {
@@ -104,63 +106,57 @@ export function Octopus() {
   };
 
   // Helper function to get a unique target position near center for each octopus
-  const getOctopusTargetPosition = (id: number) => {
-    const centerX = dimensions.width / 2;
-    const centerY = dimensions.height / 2;
+  const getOctopusTargetPosition = (octopus: OctopusData, time: number): { x: number; y: number } => {
+    const noise = Math.sin(time * 0.001 + octopus.id * 0.5) * 0.5 + 0.5;
+    const radius = 100 + noise * 150;
+    const angleOffset = Math.sin(time * 0.0005 + octopus.id * 0.7) * Math.PI;
+    const baseAngle = (octopus.id / NUM_OCTOPI) * Math.PI * 2 + angleOffset;
     
-    // Create a more varied distribution using multiple factors
-    const baseAngle = (id * Math.PI * 2) / NUM_OCTOPI;
-    const timeOffset = Math.sin(Date.now() / 5000 + id * 0.1) * Math.PI; // Slow rotation over time
-    const angle = baseAngle + timeOffset;
-    
-    // Use multiple radii to create clusters at different distances
-    const innerRadius = 100;
-    const outerRadius = 250;
-    const radiusMultiplier = Math.sin(id * 2.7) * 0.5 + 0.5; // Creates varied distances
-    const radius = innerRadius + (outerRadius - innerRadius) * radiusMultiplier;
-    
-    // Add some controlled randomness
-    const jitterX = (Math.random() - 0.5) * 50;
-    const jitterY = (Math.random() - 0.5) * 50;
+    // Add some chaos to the movement
+    const chaosX = Math.sin(time * 0.002 + octopus.id * 1.1) * 30;
+    const chaosY = Math.cos(time * 0.002 + octopus.id * 0.9) * 30;
     
     return {
-      x: centerX + Math.cos(angle) * radius + jitterX,
-      y: centerY + Math.sin(angle) * radius + jitterY
+      x: TANK_WIDTH / 2 + Math.cos(baseAngle) * radius + chaosX,
+      y: TANK_HEIGHT / 2 + Math.sin(baseAngle) * radius + chaosY
     };
   };
 
-  // Helper function to calculate movement towards center
-  const moveTowardsCenter = (octopus: OctopusData) => {
-    if (octopus.isCaught) {
-      const tankPos = getRandomTankPosition();
-      return tankPos;
+  const updateOctopusPosition = (octopus: OctopusData, mouseX: number, mouseY: number, time: number) => {
+    const target = getOctopusTargetPosition(octopus, time);
+    const dx = target.x - octopus.x;
+    const dy = target.y - octopus.y;
+    const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
+
+    // Calculate distance to mouse
+    const mouseDistX = mouseX - octopus.x;
+    const mouseDistY = mouseY - octopus.y;
+    const mouseDistance = Math.sqrt(mouseDistX * mouseDistX + mouseDistY * mouseDistY);
+
+    // Base speed varies with a sine wave for more organic movement
+    const timeVariation = Math.sin(time * 0.001 + octopus.id * 0.3) * 0.3 + 0.7;
+    let speed = IDLE_SPEED * timeVariation;
+
+    // Increase speed when mouse is nearby, with some randomness
+    if (mouseDistance < 200) {
+      const panicIntensity = (1 - mouseDistance / 200) * (0.8 + Math.random() * 0.4);
+      speed += IDLE_SPEED * 3 * panicIntensity;
     }
 
-    const target = getOctopusTargetPosition(octopus.id);
-    const dx = target.x - octopus.position.x;
-    const dy = target.y - octopus.position.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
+    // Add slight random movement even when idle
+    const randomAngle = Math.sin(time * 0.003 + octopus.id * 1.5) * Math.PI * 0.1;
+    const finalDx = dx * Math.cos(randomAngle) - dy * Math.sin(randomAngle);
+    const finalDy = dx * Math.sin(randomAngle) + dy * Math.cos(randomAngle);
 
-    // Calculate how close to the edge the octopus is
-    const distanceFromEdgeX = Math.min(octopus.position.x, dimensions.width - octopus.position.x);
-    const distanceFromEdgeY = Math.min(octopus.position.y, dimensions.height - octopus.position.y);
-    const edgeProximity = Math.min(distanceFromEdgeX, distanceFromEdgeY);
-    
-    // More aggressive speed scaling
-    const baseSpeed = IDLE_SPEED * (1 + Math.max(0, (800 - edgeProximity) / 100));
-    const speedMultiplier = Math.min(4, 1 + distance / 300); // More aggressive distance scaling
-
-    if (distance > 5) {
-      const angle = Math.atan2(dy, dx);
-      const waveOffset = Math.sin(Date.now() / 1000 + octopus.id * 0.5) * 0.2; // Reduced wave offset for more direct movement
-      const adjustedAngle = angle + waveOffset;
-      
-      let newX = octopus.position.x + Math.cos(adjustedAngle) * baseSpeed * speedMultiplier;
-      let newY = octopus.position.y + Math.sin(adjustedAngle) * baseSpeed * speedMultiplier;
-
-      return { x: newX, y: newY };
+    // Normalize and apply speed
+    const length = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
+    if (length > 0) {
+      return {
+        x: octopus.x + (finalDx / length) * speed,
+        y: octopus.y + (finalDy / length) * speed
+      };
     }
-    return octopus.position;
+    return { x: octopus.x, y: octopus.y };
   };
 
   useEffect(() => {
@@ -187,13 +183,9 @@ export function Octopus() {
         const radius = spiralSpacing * Math.sqrt(i);
         newOctopi.push({
           id: i,
-          position: {
-            x: centerX + Math.cos(angle) * radius,
-            y: centerY + Math.sin(angle) * radius
-          },
-          isMoving: false,
-          justWrapped: false,
-          isCaught: false
+          x: centerX + Math.cos(angle) * radius,
+          y: centerY + Math.sin(angle) * radius,
+          isPopping: false
         });
       }
       setOctopi(newOctopi);
@@ -216,15 +208,16 @@ export function Octopus() {
 
   // Reduce bubble creation frequency
   useEffect(() => {
-    const movingOctopi = octopi.filter(o => o.isMoving && !o.isCaught);
+    const movingOctopi = octopi.filter(o => !o.isPopping);
     if (movingOctopi.length > 0 && initialized) {
       const interval = setInterval(() => {
         // Only create bubbles for a subset of moving octopi
         const randomOctopus = movingOctopi[Math.floor(Math.random() * movingOctopi.length)];
         const newBubble = {
           id: Date.now(),
-          x: randomOctopus.position.x + (Math.random() - 0.5) * 30,
-          y: randomOctopus.position.y + (Math.random() - 0.5) * 30,
+          x: randomOctopus.x + (Math.random() - 0.5) * 30,
+          y: randomOctopus.y + (Math.random() - 0.5) * 30,
+          size: Math.random() * 8 + 4
         };
         setBubbles(prev => [...prev, newBubble]);
       }, 200); // Reduced frequency
@@ -248,20 +241,19 @@ export function Octopus() {
 
     const moveInterval = setInterval(() => {
       setOctopi(prevOctopi => prevOctopi.map(octopus => {
-        if (!octopus.isMoving && !octopus.isCaught) {
-          const newPosition = moveTowardsCenter(octopus);
-          return {
-            ...octopus,
-            position: newPosition,
-            isMoving: true
-          };
-        }
-        return octopus;
+        if (octopus.isPopping) return octopus;
+        const { x, y } = updateOctopusPosition(octopus, mousePos.x, mousePos.y, Date.now());
+        return {
+          ...octopus,
+          x,
+          y,
+          isPopping: true
+        };
       }));
     }, 50);
 
     return () => clearInterval(moveInterval);
-  }, [dimensions, initialized]);
+  }, [mousePos, initialized]);
 
   useEffect(() => {
     if (!initialized) return;
@@ -284,140 +276,93 @@ export function Octopus() {
     };
   }, [initialized, isGameComplete, startTime]);
 
-  useEffect(() => {
-    if (!initialized || isGameComplete) return;  // Don't process mouse moves if game is complete
+  // Performance optimization: Use useCallback for event handlers
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isGameComplete) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      setMousePos({ x: e.clientX, y: e.clientY });
-      
-      // Update custom cursor
-      const cursor = document.querySelector('.custom-cursor') as HTMLElement;
-      if (cursor) {
-        cursor.style.left = `${e.clientX}px`;
-        cursor.style.top = `${e.clientY}px`;
-        cursor.style.display = 'block';
-      }
-      
-      // Update each octopus
-      setOctopi(prevOctopi => {
-        let newCaughtCount = 0;
-        const updatedOctopi = prevOctopi.map(octopus => {
-          // Count already caught octopi
-          if (octopus.isCaught) {
-            newCaughtCount++;
-            return octopus;
-          }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-          const dx = e.clientX - octopus.position.x;
-          const dy = e.clientY - octopus.position.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          
-          // Check if octopus is caught
-          if (distance < CATCH_DISTANCE) {
-            newCaughtCount++;
-            // Create fewer catch bubbles
-            const newBubbles = [...Array(4)].map((_, i) => ({
+    // Update cursor position
+    setMousePos({ x: mouseX, y: mouseY });
+
+    // Performance optimization: Batch state updates
+    const newCatchBubbles: CatchBubble[] = [];
+
+    setOctopi(prevOctopi => {
+      const currentTime = Date.now();
+      return prevOctopi.map(octopus => {
+        if (octopus.isPopping) return octopus;
+
+        const { x, y } = updateOctopusPosition(octopus, mouseX, mouseY, currentTime);
+        const distanceToMouse = Math.sqrt(
+          Math.pow(mouseX - x, 2) + Math.pow(mouseY - y, 2)
+        );
+
+        if (distanceToMouse < CATCH_RADIUS && !octopus.isPopping) {
+          // Create catch effect bubbles
+          for (let i = 0; i < 4; i++) {
+            const angle = (i * Math.PI * 2) / 4 + Math.random() * 0.5;
+            newCatchBubbles.push({
               id: Date.now() + i,
-              x: octopus.position.x,
-              y: octopus.position.y,
-              angle: (i * Math.PI * 2) / 4
-            }));
-            setCatchBubbles(prev => [...prev, ...newBubbles]);
-            setTimeout(() => {
-              setCatchBubbles(prev => prev.filter(b => !newBubbles.find(nb => nb.id === b.id)));
-            }, 300); // Reduced animation duration
-            return {
-              ...octopus,
-              isCaught: true,
-              isPopping: true,
-              isMoving: false
-            };
+              x,
+              y,
+              angle
+            });
           }
 
-          if (distance < DETECTION_RADIUS || octopus.justWrapped) {
-            let angle = Math.atan2(dy, dx);
-            
-            if (octopus.justWrapped) {
-              const centerDx = dimensions.width / 2 - octopus.position.x;
-              const centerDy = dimensions.height / 2 - octopus.position.y;
-              const centerAngle = Math.atan2(centerDy, centerDx);
-              angle = (angle + centerAngle) / 2;
-            }
-            
-            const speedFactor = Math.min(1, Math.max(0, (SAFE_DISTANCE - distance) / SAFE_DISTANCE));
-            const speed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * speedFactor;
-            
-            let newX = octopus.position.x - Math.cos(angle) * speed;
-            let newY = octopus.position.y - Math.sin(angle) * speed;
-
-            const { position: wrappedPosition, wrapped } = wrapPosition({ x: newX, y: newY });
-
-            if (wrapped) {
-              setTimeout(() => {
-                setOctopi(prev => prev.map(o => 
-                  o.id === octopus.id ? { ...o, justWrapped: false } : o
-                ));
-              }, 500);
-            }
-
-            return {
-              ...octopus,
-              position: wrappedPosition,
-              isMoving: true,
-              justWrapped: wrapped ? true : octopus.justWrapped
-            };
-          }
-
-          return {
-            ...octopus,
-            isMoving: false
-          };
-        });
-
-        // Update caught count and check for game completion
-        setCaughtCount(newCaughtCount);
-        
-        if (newCaughtCount === NUM_OCTOPI && !isGameComplete) {
-          const finalEndTime = Date.now();
-          setEndTime(finalEndTime);
-          setIsGameComplete(true);
-          console.log('Game Complete!', { 
-            caughtCount, 
-            NUM_OCTOPI,
-            startTime,
-            finalEndTime,
-            duration: finalEndTime - startTime! 
-          });
+          return { ...octopus, isPopping: true };
         }
 
-        return updatedOctopi;
+        return { ...octopus, x, y };
       });
-    };
+    });
 
-    const handleMouseLeave = () => {
-      const cursor = document.querySelector('.custom-cursor') as HTMLElement;
-      if (cursor) {
-        cursor.style.display = 'none';
+    // Batch update catch bubbles
+    if (newCatchBubbles.length > 0) {
+      setCatchBubbles(prev => [...prev, ...newCatchBubbles]);
+      setTimeout(() => {
+        setCatchBubbles(prev => 
+          prev.filter(bubble => !newCatchBubbles.some(nb => nb.id === bubble.id))
+        );
+      }, 300);
+    }
+  }, [isGameComplete]);
+
+  // Performance optimization: Use requestAnimationFrame for ambient bubbles
+  useEffect(() => {
+    if (isGameComplete) return;
+
+    let animationFrameId: number;
+    let lastBubbleTime = 0;
+    const BUBBLE_INTERVAL = 200; // Reduced from 100ms to 200ms
+
+    const animate = (timestamp: number) => {
+      if (timestamp - lastBubbleTime > BUBBLE_INTERVAL) {
+        setBubbles(prev => {
+          const newBubbles = [...prev];
+          // Only create bubbles for one random moving octopus
+          const movingOctopus = octopi[Math.floor(Math.random() * octopi.length)];
+          if (movingOctopus && !movingOctopus.isPopping) {
+            newBubbles.push({
+              id: Date.now(),
+              x: movingOctopus.x,
+              y: movingOctopus.y,
+              size: Math.random() * 8 + 4
+            });
+          }
+          // Limit maximum bubbles
+          return newBubbles.slice(-20);
+        });
+        lastBubbleTime = timestamp;
       }
+      animationFrameId = requestAnimationFrame(animate);
     };
 
-    const handleMouseEnter = () => {
-      const cursor = document.querySelector('.custom-cursor') as HTMLElement;
-      if (cursor) {
-        cursor.style.display = 'block';
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    document.body.addEventListener('mouseleave', handleMouseLeave);
-    document.body.addEventListener('mouseenter', handleMouseEnter);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      document.body.removeEventListener('mouseleave', handleMouseLeave);
-      document.body.removeEventListener('mouseenter', handleMouseEnter);
-    };
-  }, [dimensions, initialized, isGameComplete, startTime]);
+    animationFrameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [isGameComplete, octopi]);
 
   const handleMouseDown = () => {
     const cursor = document.querySelector('.custom-cursor');
@@ -462,13 +407,9 @@ export function Octopus() {
       const radius = spiralSpacing * Math.sqrt(i);
       newOctopi.push({
         id: i,
-        position: {
-          x: centerX + Math.cos(angle) * radius,
-          y: centerY + Math.sin(angle) * radius
-        },
-        isMoving: false,
-        justWrapped: false,
-        isCaught: false
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+        isPopping: false
       });
     }
     setOctopi(newOctopi);
@@ -960,16 +901,16 @@ export function Octopus() {
           key={octopus.id}
           className={`octopus ${octopus.isPopping ? 'popping' : ''}`}
           style={{
-            left: `${octopus.position.x}px`,
-            top: `${octopus.position.y}px`,
-            fontSize: octopus.isCaught ? `${CAUGHT_OCTOPUS_SIZE}px` : '60px',
+            left: `${octopus.x}px`,
+            top: `${octopus.y}px`,
+            fontSize: octopus.isPopping ? `${CAUGHT_OCTOPUS_SIZE}px` : '60px',
             transition: 'transform 0.1s ease-out, font-size 0.3s ease-out',
             transform: !octopus.isPopping ? `translate(-50%, -50%) rotate(${
-              Math.atan2(mousePos.y - octopus.position.y, mousePos.x - octopus.position.x) * (180 / Math.PI)
+              Math.atan2(mousePos.y - octopus.y, mousePos.x - octopus.x) * (180 / Math.PI)
             }deg)` : undefined,
-            zIndex: octopus.isCaught ? 1000 : 1,
+            zIndex: octopus.isPopping ? 1000 : 1,
             opacity: isGameComplete ? 0.7 : 1,
-            display: octopus.isCaught && !octopus.isPopping ? 'none' : 'block'
+            display: octopus.isPopping ? 'none' : 'block'
           }}
         >
           🐙
